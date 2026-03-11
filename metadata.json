@@ -1,0 +1,5 @@
+{
+  "name": "DefectTracker Pro",
+  "description": "Construction defect management app with PDF marking and Google Drive/Sheets integration.",
+  "requestFramePermissions": []
+}
