@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Link } from 'react-router-dom';
-import { FolderOpen, Plus, MapPin, Clock, CheckCircle2, RefreshCw, Loader2 } from 'lucide-react';
+import { FolderOpen, Plus, MapPin, Clock, CheckCircle2, RefreshCw } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { Project } from '../types';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 export default function Dashboard() {
-  const { projects, defects, addProject, syncWithGoogle, isDemoMode } = useStore();
+  const { projects, defects, addProject, syncWithGoogle, isDemoMode, user } = useStore();
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
@@ -36,7 +37,7 @@ export default function Dashboard() {
         name: newProjectName,
         description: newProjectDesc,
         createdAt: new Date().toISOString(),
-        createdBy: 'Current User', // In a real app, use actual user name
+        createdBy: user?.name || 'Current User',
       };
 
       await addProject(project);
@@ -49,20 +50,22 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex-1 overflow-auto bg-zinc-50 p-8">
+    <div className="flex-1 overflow-auto bg-zinc-50 p-4 md:p-8">
+      {isSubmittingProject && <LoadingOverlay message="Creating project and setting up folders..." />}
+      {isSyncing && <LoadingOverlay message="Syncing with Google Drive..." />}
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 md:mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-zinc-900 tracking-tight">Projects Dashboard</h1>
-            <p className="mt-2 text-zinc-500">Manage your construction projects and track their overall status.</p>
+            <h1 className="text-2xl md:text-3xl font-bold text-zinc-900 tracking-tight">Projects Dashboard</h1>
+            <p className="mt-1 md:mt-2 text-sm md:text-base text-zinc-500">Manage your construction projects and track their overall status.</p>
           </div>
           
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-3">
             {!isDemoMode && (
               <button 
                 onClick={handleSync}
                 disabled={isSyncing}
-                className="inline-flex items-center px-4 py-2 border border-zinc-300 shadow-sm text-sm font-medium rounded-xl text-zinc-700 bg-white hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-colors disabled:opacity-50"
+                className="inline-flex items-center px-4 py-2 border border-zinc-300 shadow-sm text-sm font-medium rounded-xl text-zinc-700 bg-white hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-lidl-blue transition-colors disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
                 Sync
@@ -70,7 +73,7 @@ export default function Dashboard() {
             )}
             <button 
               onClick={() => setIsCreating(true)}
-              className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-xl shadow-sm text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-colors"
+              className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-xl shadow-sm text-white bg-lidl-blue hover:bg-lidl-blue/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-lidl-blue transition-colors"
             >
               <Plus className="w-5 h-5 mr-2" />
               New Project
@@ -89,7 +92,7 @@ export default function Dashboard() {
                   required
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  className="block w-full rounded-xl border-zinc-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 sm:text-sm px-4 py-2.5 border bg-zinc-50"
+                  className="block w-full rounded-xl border-zinc-300 shadow-sm focus:border-lidl-blue focus:ring-lidl-blue sm:text-sm px-4 py-2.5 border bg-zinc-50"
                   placeholder="e.g., Downtown Skyscraper"
                 />
               </div>
@@ -98,7 +101,7 @@ export default function Dashboard() {
                 <textarea
                   value={newProjectDesc}
                   onChange={(e) => setNewProjectDesc(e.target.value)}
-                  className="block w-full rounded-xl border-zinc-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 sm:text-sm px-4 py-2.5 border bg-zinc-50 resize-none"
+                  className="block w-full rounded-xl border-zinc-300 shadow-sm focus:border-lidl-blue focus:ring-lidl-blue sm:text-sm px-4 py-2.5 border bg-zinc-50 resize-none"
                   placeholder="Brief description of the project..."
                   rows={3}
                 />
@@ -115,9 +118,8 @@ export default function Dashboard() {
                 <button
                   type="submit"
                   disabled={isSubmittingProject}
-                  className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 flex items-center"
+                  className="px-4 py-2 text-sm font-medium text-white bg-lidl-blue rounded-xl hover:bg-lidl-blue/90 disabled:opacity-50 flex items-center"
                 >
-                  {isSubmittingProject && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   Create Project
                 </button>
               </div>
@@ -129,19 +131,19 @@ export default function Dashboard() {
           {projects.map((project) => {
             const projectDefects = defects.filter(d => d.projectId === project.id);
             const openCount = projectDefects.filter(d => d.status === 'Open').length;
-            const waitingCount = projectDefects.filter(d => d.status === 'Waiting for Feedback').length;
-            const closedCount = projectDefects.filter(d => d.status === 'Resolved' || d.status === 'Closed').length;
+            const waitingCount = projectDefects.filter(d => d.status === 'Waiting for feedback').length;
+            const closedCount = projectDefects.filter(d => d.status === 'Closed').length;
 
             return (
               <Link 
                 key={project.id} 
                 to={`/projects/${project.id}`}
-                className="bg-white rounded-2xl shadow-sm border border-zinc-200 overflow-hidden hover:shadow-md transition-all hover:border-emerald-500/30 flex flex-col"
+                className="bg-white rounded-2xl shadow-sm border border-zinc-200 overflow-hidden hover:shadow-md transition-all hover:border-lidl-blue/30 flex flex-col"
               >
                 <div className="p-6 border-b border-zinc-100 flex-1">
                   <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center">
-                      <FolderOpen className="w-5 h-5 text-emerald-600" />
+                    <div className="w-10 h-10 rounded-lg bg-lidl-blue/10 flex items-center justify-center">
+                      <FolderOpen className="w-5 h-5 text-lidl-blue" />
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-zinc-900 truncate">{project.name}</h3>
@@ -166,7 +168,7 @@ export default function Dashboard() {
                   </div>
                   <div className="text-center pl-4">
                     <p className="text-xs font-medium text-zinc-500 mb-1 flex items-center justify-center">
-                      <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-500" /> Closed
+                      <CheckCircle2 className="w-3 h-3 mr-1 text-lidl-blue" /> Closed
                     </p>
                     <p className="text-lg font-semibold text-zinc-900">{closedCount}</p>
                   </div>
@@ -183,7 +185,7 @@ export default function Dashboard() {
               <div className="mt-6">
                 <button
                   onClick={() => setIsCreating(true)}
-                  className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500"
+                  className="inline-flex items-center rounded-md bg-lidl-blue px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-lidl-blue/90"
                 >
                   <Plus className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
                   New Project

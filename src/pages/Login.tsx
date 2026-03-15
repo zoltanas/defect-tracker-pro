@@ -67,8 +67,8 @@ export default function Login() {
     <div className="min-h-screen bg-zinc-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <MapPin className="text-white w-8 h-8" />
+          <div className="w-20 h-20 flex items-center justify-center">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Lidl-Logo.svg" alt="Lidl Logo" className="w-full h-full object-contain" />
           </div>
         </div>
         <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-zinc-900">
@@ -119,7 +119,7 @@ export default function Login() {
             <button
               onClick={() => login()}
               disabled={!hasClientId}
-              className="w-full flex justify-center py-3 px-4 border border-zinc-300 rounded-xl shadow-sm bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-full flex justify-center py-3 px-4 border border-zinc-300 rounded-xl shadow-sm bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-lidl-blue disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                 <path

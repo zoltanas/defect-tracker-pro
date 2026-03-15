@@ -19,6 +19,35 @@ async function handleResponse(response: Response) {
   return response.json();
 }
 
+export async function createDriveFolder(name: string, parentId: string, accessToken: string): Promise<string> {
+  const response = await fetch(`${DRIVE_API}/files?supportsAllDrives=true`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId]
+    }),
+  });
+  const data = await handleResponse(response);
+  return data.id;
+}
+
+export async function deleteDriveFile(fileId: string, accessToken: string): Promise<void> {
+  const response = await fetch(`${DRIVE_API}/files/${fileId}?supportsAllDrives=true`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!response.ok && response.status !== 404) {
+    await handleResponse(response);
+  }
+}
+
 /**
  * Uploads a file to a specific Google Drive folder.
  * Uses a 2-step process (metadata then media) for reliable uploads.
@@ -128,9 +157,9 @@ export async function createOrGetDatabaseSheet(
     body: JSON.stringify({
       valueInputOption: 'USER_ENTERED',
       data: [
-        { range: 'Projects!A1:E1', values: [['ID', 'Name', 'Description', 'CreatedAt', 'CreatedBy']] },
+        { range: 'Projects!A1:F1', values: [['ID', 'Name', 'Description', 'CreatedAt', 'CreatedBy', 'FolderID']] },
         { range: 'Drawings!A1:D1', values: [['ID', 'ProjectID', 'Name', 'URL']] },
-        { range: 'Defects!A1:L1', values: [['ID', 'ProjectID', 'Title', 'Description', 'Status', 'X', 'Y', 'DrawingID', 'CreatedAt', 'CreatedBy', 'Assignee', 'Attachments']] }
+        { range: 'Defects!A1:M1', values: [['ID', 'ProjectID', 'Title', 'Description', 'Status', 'X', 'Y', 'DrawingID', 'CreatedAt', 'CreatedBy', 'Assignee', 'Attachments', 'FolderID']] }
       ]
     })
   });
@@ -140,8 +169,8 @@ export async function createOrGetDatabaseSheet(
 }
 
 export async function appendProjectToSheet(spreadsheetId: string, project: Project, accessToken: string) {
-  const row = [project.id, project.name, project.description, project.createdAt, project.createdBy];
-  const response = await fetch(`${SHEETS_API}/${spreadsheetId}/values/Projects!A:E:append?valueInputOption=USER_ENTERED`, {
+  const row = [project.id, project.name, project.description, project.createdAt, project.createdBy, project.folderId || ''];
+  const response = await fetch(`${SHEETS_API}/${spreadsheetId}/values/Projects!A:F:append?valueInputOption=USER_ENTERED`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ values: [row] }),
@@ -163,9 +192,9 @@ export async function appendDefectToSheet(spreadsheetId: string, defect: Defect,
   const row = [
     defect.id, defect.projectId, defect.title, defect.description, defect.status,
     defect.x?.toString() || '', defect.y?.toString() || '', defect.drawingId || '', defect.createdAt,
-    defect.createdBy, defect.assignee || '', JSON.stringify(defect.attachments || [])
+    defect.createdBy, defect.assignee || '', JSON.stringify(defect.attachments || []), defect.folderId || ''
   ];
-  const response = await fetch(`${SHEETS_API}/${spreadsheetId}/values/Defects!A:L:append?valueInputOption=USER_ENTERED`, {
+  const response = await fetch(`${SHEETS_API}/${spreadsheetId}/values/Defects!A:M:append?valueInputOption=USER_ENTERED`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ values: [row] }),
@@ -185,7 +214,7 @@ export async function overwriteSheetData(
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      ranges: ['Projects!A2:E', 'Drawings!A2:D', 'Defects!A2:L']
+      ranges: ['Projects!A2:F', 'Drawings!A2:D', 'Defects!A2:M']
     })
   });
   await handleResponse(clearRes);
@@ -195,7 +224,7 @@ export async function overwriteSheetData(
   if (projects.length > 0) {
     data.push({
       range: 'Projects!A2',
-      values: projects.map(p => [p.id, p.name, p.description, p.createdAt, p.createdBy])
+      values: projects.map(p => [p.id, p.name, p.description, p.createdAt, p.createdBy, p.folderId || ''])
     });
   }
   
@@ -212,7 +241,7 @@ export async function overwriteSheetData(
       values: defects.map(d => [
         d.id, d.projectId, d.title, d.description, d.status,
         d.x?.toString() || '', d.y?.toString() || '', d.drawingId || '', d.createdAt,
-        d.createdBy, d.assignee || '', JSON.stringify(d.attachments || [])
+        d.createdBy, d.assignee || '', JSON.stringify(d.attachments || []), d.folderId || ''
       ])
     });
   }
@@ -231,13 +260,13 @@ export async function overwriteSheetData(
 }
 
 export async function getDatabaseData(spreadsheetId: string, accessToken: string) {
-  const response = await fetch(`${SHEETS_API}/${spreadsheetId}/values:batchGet?ranges=Projects!A2:E&ranges=Drawings!A2:D&ranges=Defects!A2:L`, {
+  const response = await fetch(`${SHEETS_API}/${spreadsheetId}/values:batchGet?ranges=Projects!A2:F&ranges=Drawings!A2:D&ranges=Defects!A2:M`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const data = await handleResponse(response);
   
   const projects = (data.valueRanges[0].values || []).map((row: any[]) => ({
-    id: row[0], name: row[1], description: row[2], createdAt: row[3], createdBy: row[4]
+    id: row[0], name: row[1], description: row[2], createdAt: row[3], createdBy: row[4], folderId: row[5] || undefined
   }));
   
   const drawings = (data.valueRanges[1].values || []).map((row: any[]) => ({
@@ -250,7 +279,8 @@ export async function getDatabaseData(spreadsheetId: string, accessToken: string
     y: row[6] ? parseFloat(row[6]) : undefined, 
     drawingId: row[7] || undefined,
     createdAt: row[8], createdBy: row[9], assignee: row[10],
-    attachments: row[11] ? JSON.parse(row[11]) : []
+    attachments: row[11] ? JSON.parse(row[11]) : [],
+    folderId: row[12] || undefined
   }));
 
   return { projects, drawings, defects };

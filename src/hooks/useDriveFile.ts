@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
+import { get, set } from 'idb-keyval';
 
 export function getDriveFileId(url: string): string | null {
   if (!url || url.startsWith('blob:') || url.startsWith('data:')) return null;
@@ -23,40 +24,56 @@ export function useDriveFile(url: string) {
       return;
     }
 
-    if (!user?.accessToken) {
-      setError(new Error('Not authenticated'));
-      setLoading(false);
-      return;
-    }
-
     let isMounted = true;
     let currentBlobUrl: string | null = null;
-    setLoading(true);
-    setError(null);
+    
+    const loadFile = async () => {
+      setLoading(true);
+      setError(null);
 
-    fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: {
-        Authorization: `Bearer ${user.accessToken}`
-      }
-    })
-      .then(res => {
+      try {
+        const cacheKey = `drive-file-${fileId}`;
+        const cachedBlob = await get<Blob>(cacheKey);
+        
+        if (cachedBlob) {
+          if (isMounted) {
+            currentBlobUrl = URL.createObjectURL(cachedBlob);
+            setBlobUrl(currentBlobUrl);
+            setLoading(false);
+          }
+          return;
+        }
+
+        if (!user?.accessToken) {
+          throw new Error('Not authenticated');
+        }
+
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          headers: {
+            Authorization: `Bearer ${user.accessToken}`
+          }
+        });
+
         if (!res.ok) throw new Error('Failed to fetch file');
-        return res.blob();
-      })
-      .then(blob => {
+        
+        const blob = await res.blob();
+        await set(cacheKey, blob);
+
         if (isMounted) {
           currentBlobUrl = URL.createObjectURL(blob);
           setBlobUrl(currentBlobUrl);
           setLoading(false);
         }
-      })
-      .catch(err => {
+      } catch (err) {
         if (isMounted) {
           console.error('Error fetching Drive file:', err);
-          setError(err);
+          setError(err instanceof Error ? err : new Error(String(err)));
           setLoading(false);
         }
-      });
+      }
+    };
+
+    loadFile();
 
     return () => {
       isMounted = false;

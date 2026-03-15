@@ -9,8 +9,11 @@ import {
   getDatabaseData, 
   createOrGetDatabaseSheet, 
   uploadFileToDrive,
-  overwriteSheetData
+  overwriteSheetData,
+  createDriveFolder,
+  deleteDriveFile
 } from '../services/googleApi';
+import { getDriveFileId } from '../hooks/useDriveFile';
 
 interface AppState {
   user: User | null;
@@ -27,6 +30,7 @@ interface AppState {
   setDefects: (defects: Defect[]) => void;
   
   addProject: (project: Project) => Promise<void>;
+  updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
   addDrawing: (drawing: Drawing) => Promise<void>;
   addDefect: (defect: Defect) => Promise<void>;
   updateDefect: (id: string, updates: Partial<Defect>) => Promise<void>;
@@ -60,18 +64,50 @@ export const useStore = create<AppState>()(
       
       addProject: async (project) => {
         const state = get();
-        set((state) => ({ projects: [...state.projects, project] }));
+        let finalProject = { ...project };
+        
         if (!state.isDemoMode && state.user && state.spreadsheetId) {
           try {
-            await appendProjectToSheet(state.spreadsheetId, project, state.user.accessToken);
+            const parentFolderId = import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || DEFAULT_FOLDER_ID;
+            const folderId = await createDriveFolder(project.name, parentFolderId, state.user.accessToken);
+            finalProject.folderId = folderId;
+            
+            set((state) => ({ projects: [...state.projects, finalProject] }));
+            await appendProjectToSheet(state.spreadsheetId, finalProject, state.user.accessToken);
           } catch (error: any) {
             console.error('Failed to save project to Google Sheets', error);
-            // Revert state on failure
-            set((state) => ({ projects: state.projects.filter(p => p.id !== project.id) }));
             if (error.message === 'AUTH_EXPIRED') {
               set({ user: null, spreadsheetId: null });
               window.location.href = '/login?error=auth_expired';
             } else if (error.message === 'MISSING_SCOPES') {
+              set({ user: null, spreadsheetId: null });
+              window.location.href = '/login?error=missing_scopes';
+            }
+          }
+        } else {
+          set((state) => ({ projects: [...state.projects, finalProject] }));
+        }
+      },
+
+      updateProject: async (id, updates) => {
+        const state = get();
+        const originalProjects = state.projects;
+        
+        // Optimistically update
+        const newProjects = state.projects.map(p => p.id === id ? { ...p, ...updates } : p);
+        set({ projects: newProjects });
+        
+        if (!state.isDemoMode && state.user && state.spreadsheetId) {
+          try {
+            await overwriteSheetData(state.spreadsheetId, get().projects, state.drawings, state.defects, state.user.accessToken);
+          } catch (e: any) {
+            console.error('Failed to sync project update', e);
+            // Revert on failure
+            set({ projects: originalProjects });
+            if (e.message === 'AUTH_EXPIRED') {
+              set({ user: null, spreadsheetId: null });
+              window.location.href = '/login?error=auth_expired';
+            } else if (e.message === 'MISSING_SCOPES') {
               set({ user: null, spreadsheetId: null });
               window.location.href = '/login?error=missing_scopes';
             }
@@ -86,7 +122,8 @@ export const useStore = create<AppState>()(
         set((state) => ({ drawings: [...state.drawings, drawing] }));
         if (!state.isDemoMode && state.user && drawing.file) {
           try {
-            const folderId = import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || DEFAULT_FOLDER_ID;
+            const project = state.projects.find(p => p.id === drawing.projectId);
+            const folderId = project?.folderId || import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || DEFAULT_FOLDER_ID;
             const { url } = await uploadFileToDrive(drawing.file, folderId, state.user.accessToken);
             
             // Update the drawing with the real URL
@@ -116,66 +153,60 @@ export const useStore = create<AppState>()(
         const state = get();
         let finalDefect = { ...defect };
         
-        // Optimistically add the defect with local URLs
-        set((state) => ({ defects: [...state.defects, finalDefect] }));
-
         if (!state.isDemoMode && state.user) {
-          if (defect.attachments && defect.attachments.length > 0) {
-            const folderId = import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || DEFAULT_FOLDER_ID;
-            const processedAttachments = [];
-            
-            for (const att of defect.attachments) {
-              if (att.file) {
-                try {
-                  const { url } = await uploadFileToDrive(att.file, folderId, state.user.accessToken);
-                  processedAttachments.push({ ...att, url, file: undefined });
-                } catch (e: any) {
-                  console.error('Failed to upload attachment', e);
-                  if (e.message === 'AUTH_EXPIRED') {
-                    set({ user: null, spreadsheetId: null });
-                    window.location.href = '/login?error=auth_expired';
-                    return;
-                  } else if (e.message === 'MISSING_SCOPES') {
-                    set({ user: null, spreadsheetId: null });
-                    window.location.href = '/login?error=missing_scopes';
-                    return;
-                  }
-                  processedAttachments.push({ ...att, file: undefined });
-                }
-              } else {
-                processedAttachments.push(att);
-              }
-            }
-            finalDefect.attachments = processedAttachments;
-            
-            // Update the defect with the real URLs
-            set((state) => ({
-              defects: state.defects.map(d => d.id === finalDefect.id ? finalDefect : d)
-            }));
-          }
+          try {
+            const project = state.projects.find(p => p.id === defect.projectId);
+            const parentFolderId = project?.folderId || import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || DEFAULT_FOLDER_ID;
+            const defectFolderId = await createDriveFolder(`Defect: ${defect.title}`, parentFolderId, state.user.accessToken);
+            finalDefect.folderId = defectFolderId;
 
-          if (state.spreadsheetId) {
-            try {
-              await appendDefectToSheet(state.spreadsheetId, finalDefect, state.user.accessToken);
-            } catch (e: any) {
-              console.error('Failed to sync defect', e);
-              // Revert state on failure
-              set((state) => ({ defects: state.defects.filter(d => d.id !== finalDefect.id) }));
-              if (e.message === 'AUTH_EXPIRED') {
-                set({ user: null, spreadsheetId: null });
-                window.location.href = '/login?error=auth_expired';
-              } else if (e.message === 'MISSING_SCOPES') {
-                set({ user: null, spreadsheetId: null });
-                window.location.href = '/login?error=missing_scopes';
+            if (defect.attachments && defect.attachments.length > 0) {
+              const processedAttachments = [];
+              
+              for (const att of defect.attachments) {
+                if (att.file) {
+                  try {
+                    const { url } = await uploadFileToDrive(att.file, defectFolderId, state.user.accessToken);
+                    processedAttachments.push({ ...att, url, file: undefined });
+                  } catch (e: any) {
+                    console.error('Failed to upload attachment', e);
+                    if (e.message === 'AUTH_EXPIRED') {
+                      set({ user: null, spreadsheetId: null });
+                      window.location.href = '/login?error=auth_expired';
+                      return;
+                    } else if (e.message === 'MISSING_SCOPES') {
+                      set({ user: null, spreadsheetId: null });
+                      window.location.href = '/login?error=missing_scopes';
+                      return;
+                    }
+                    processedAttachments.push({ ...att, file: undefined });
+                  }
+                } else {
+                  processedAttachments.push(att);
+                }
               }
+              finalDefect.attachments = processedAttachments;
+            }
+            
+            set((state) => ({ defects: [...state.defects, finalDefect] }));
+            if (state.spreadsheetId) {
+              await appendDefectToSheet(state.spreadsheetId, finalDefect, state.user.accessToken);
+            }
+          } catch (error: any) {
+            console.error('Failed to create defect', error);
+            if (error.message === 'AUTH_EXPIRED') {
+              set({ user: null, spreadsheetId: null });
+              window.location.href = '/login?error=auth_expired';
+            } else if (error.message === 'MISSING_SCOPES') {
+              set({ user: null, spreadsheetId: null });
+              window.location.href = '/login?error=missing_scopes';
             }
           }
-        } else if (state.isDemoMode && defect.attachments) {
-          // In demo mode, just remove the file objects to avoid serialization issues
-          finalDefect.attachments = defect.attachments.map(att => ({ ...att, file: undefined }));
-          set((state) => ({
-            defects: state.defects.map(d => d.id === finalDefect.id ? finalDefect : d)
-          }));
+        } else {
+          if (state.isDemoMode && defect.attachments) {
+            finalDefect.attachments = defect.attachments.map(att => ({ ...att, file: undefined }));
+          }
+          set((state) => ({ defects: [...state.defects, finalDefect] }));
         }
       },
 
@@ -245,6 +276,7 @@ export const useStore = create<AppState>()(
       deleteDefect: async (id) => {
         const state = get();
         const originalDefects = state.defects;
+        const defectToDelete = state.defects.find(d => d.id === id);
         const newDefects = state.defects.filter(d => d.id !== id);
         
         // Optimistically update
@@ -253,6 +285,13 @@ export const useStore = create<AppState>()(
         if (!state.isDemoMode && state.user && state.spreadsheetId) {
           try {
             await overwriteSheetData(state.spreadsheetId, state.projects, state.drawings, newDefects, state.user.accessToken);
+            if (defectToDelete?.folderId) {
+              try {
+                await deleteDriveFile(defectToDelete.folderId, state.user.accessToken);
+              } catch (e) {
+                console.error('Failed to delete defect folder from Drive', e);
+              }
+            }
           } catch (e: any) {
             console.error('Failed to sync deletion', e);
             // Revert on failure
@@ -275,6 +314,7 @@ export const useStore = create<AppState>()(
         const originalProjects = state.projects;
         const originalDefects = state.defects;
         const originalDrawings = state.drawings;
+        const projectToDelete = state.projects.find(p => p.id === id);
         
         const newProjects = state.projects.filter(p => p.id !== id);
         const newDefects = state.defects.filter(d => d.projectId !== id);
@@ -290,6 +330,13 @@ export const useStore = create<AppState>()(
         if (!state.isDemoMode && state.user && state.spreadsheetId) {
           try {
             await overwriteSheetData(state.spreadsheetId, newProjects, newDrawings, newDefects, state.user.accessToken);
+            if (projectToDelete?.folderId) {
+              try {
+                await deleteDriveFile(projectToDelete.folderId, state.user.accessToken);
+              } catch (e) {
+                console.error('Failed to delete project folder from Drive', e);
+              }
+            }
           } catch (e: any) {
             console.error('Failed to sync project deletion', e);
             // Revert on failure
@@ -315,6 +362,7 @@ export const useStore = create<AppState>()(
         const state = get();
         const originalDrawings = state.drawings;
         const originalDefects = state.defects;
+        const drawingToDelete = state.drawings.find(d => d.id === id);
         
         const newDrawings = state.drawings.filter(d => d.id !== id);
         const newDefects = state.defects.filter(d => d.drawingId !== id);
@@ -328,6 +376,16 @@ export const useStore = create<AppState>()(
         if (!state.isDemoMode && state.user && state.spreadsheetId) {
           try {
             await overwriteSheetData(state.spreadsheetId, state.projects, newDrawings, newDefects, state.user.accessToken);
+            if (drawingToDelete?.url) {
+              const fileId = getDriveFileId(drawingToDelete.url);
+              if (fileId) {
+                try {
+                  await deleteDriveFile(fileId, state.user.accessToken);
+                } catch (e) {
+                  console.error('Failed to delete drawing file from Drive', e);
+                }
+              }
+            }
           } catch (e: any) {
             console.error('Failed to sync drawing deletion', e);
             // Revert on failure
@@ -366,10 +424,12 @@ export const useStore = create<AppState>()(
             
             const { projects, drawings, defects } = await getDatabaseData(spreadsheetId, state.user.accessToken);
             
-            set({ 
-              projects: projects.length > 0 ? projects : state.projects,
-              drawings: drawings.length > 0 ? drawings : state.drawings,
-              defects: defects.length > 0 ? defects : state.defects
+            // Always overwrite local state with remote data to ensure consistency.
+            // If the user deleted the database in Google Drive, this will clear the local state.
+            set({
+              projects,
+              drawings,
+              defects
             });
           } catch (error: any) {
             console.error('Failed to sync with Google', error);

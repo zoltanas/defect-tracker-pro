@@ -1,4 +1,11 @@
-export type DefectStatus = 'Open' | 'In Progress' | 'Waiting for Feedback' | 'Resolved' | 'Closed';
+export type DefectStatus = 'Open' | 'Waiting for feedback' | 'Closed';
+
+export type Role = 'Admin' | 'Lidl Project Manager' | 'General Contractor' | 'Consultant';
+
+export interface ProjectMember {
+  email: string;
+  role: Role;
+}
 
 export interface Project {
   id: string;
@@ -6,6 +13,8 @@ export interface Project {
   description: string;
   createdAt: string;
   createdBy: string;
+  folderId?: string;
+  members?: ProjectMember[];
 }
 
 export interface DefectAttachment {
@@ -14,6 +23,15 @@ export interface DefectAttachment {
   url: string;
   type: string;
   file?: File; // For local preview before upload
+  annotations?: string; // JSON string of Konva shapes
+}
+
+export interface DefectReply {
+  id: string;
+  content: string;
+  createdAt: string;
+  createdBy: string;
+  createdByEmail: string;
 }
 
 export interface Defect {
@@ -29,6 +47,8 @@ export interface Defect {
   createdBy: string;
   assignee: string;
   attachments: DefectAttachment[];
+  folderId?: string;
+  replies?: DefectReply[];
 }
 
 export interface Drawing {
